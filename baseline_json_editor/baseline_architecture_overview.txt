@@ -1,0 +1,121 @@
+================================================================================
+Baseline JSON Editor - Architecture and Codebase Overview
+================================================================================
+
+1. High-Level Architecture & Mechanism
+--------------------------------------------------------------------------------
+The Baseline JSON Editor is a Streamlit-based web application designed to convert 
+unstructured documents (like PDFs, images, DOCX, etc.) into a strictly structured 
+JSON format (the "Baseline JSON Schema"). 
+
+Once converted, users can edit the text *content* of the document directly within 
+the Streamlit interface without accidentally breaking the underlying *structure* 
+(like formatting properties, nesting, block types, and bounding boxes). 
+Finally, the modified schema can be exported to JSON, PDF, HTML, or DOCX.
+
+Mechanisms:
+[ Input Document ]
+       |
+       v
++-----------------------+      +---------------------------+      +--------------------------+
+|  Conversion Engine    | ---> |     Schema Mapping        | ---> |  Streamlit Application   |
+| (Marker or Vision API)|      | (Dicts/JSON -> Pydantic)  |      |   (UI & State Sync)      |
++-----------------------+      +---------------------------+      +--------------------------+
+                                                                             |
+                                                                             v
+[ Exports: JSON, HTML, PDF, DOCX ] <--------------------------------- [ Edited JSON State ]
+
+
+2. File Structure and Class/Method Breakdown
+--------------------------------------------------------------------------------
+
+A. Core Application & GUI
+--------------------------
+File: `app.py`
+Purpose: The main entry point using Streamlit. It handles file uploads, dispatches 
+conversion tasks, manages the UI tabs (Preview, Schema Editor, Raw JSON Editor), 
+and coordinates exports.
+
+Methods/State:
+- Session State (`st.session_state`): Maintains `synced_json_str` as the Single 
+  Source of Truth (SSOT) to guarantee the visual UI and the raw JSON editor are 
+  always synchronized bi-directionally.
+- `update_doc_state(block_id, widget_key)`: Callback fired when a user types into a 
+  text box. It recursively searches the BaselineDocument for the `block_id` and 
+  updates the content, immediately syncing the SSOT.
+- `main()`: Script entry point triggering `streamlit run`.
+
+
+B. Data Models (Pydantic)
+--------------------------
+File: `converter/schema.py`
+Purpose: Defines the strict, nested structure required for Baseline JSON documents. 
+It ensures data validation and type safety across the entire pipeline.
+
+Classes:
+- `BlockProperties`: Holds read-only metadata like `heading_level`, `row_count`, 
+  `list_type`, and inline styling (`color`, `font_family`).
+- `BaselineBlock`: Represents a recursive document node. Contains `id`, `block_type`, 
+  `content` (editable text), `properties`, `bbox`, and nested `children` blocks.
+- `BaselinePage`: A structural unit holding width, height, and a list of `BaselineBlock`s.
+- `BaselineMetadata`: Aggregates document statistics (page counts, block types).
+- `BaselineDocument`: The root model containing `title`, `pages`, and `metadata`.
+
+
+C. Conversion Engines
+--------------------------
+File 1: `converter/pdf_to_baseline.py`
+Purpose: Extracts text and structure using the local, open-source `Marker` library.
+Methods:
+- `extract_text_from_html()`: Strips HTML wrappers into clean text.
+- `extract_properties_from_block()`: Mines Marker's JSON for lists, tables, heading levels.
+- `marker_block_to_baseline()`: Recursive function mapping a Marker dict to a `BaselineBlock`.
+- `get_cached_converter()`: Initializes the heavy PyTorch Marker models, caching them 
+  via Streamlit optimizations to prevent reloading between clicks.
+- `convert_document_to_baseline()`: The main pipeline execution for Marker -> Pydantic.
+
+File 2: `converter/fast_api_converter.py`
+Purpose: Uses cloud AI (OpenAI GPT-4o-mini or Gemini 1.5 Flash Vision APIs) via 
+Structured Outputs to extract text and structure exponentially faster. Uses 
+`ThreadPoolExecutor` for parallel processing of pages/chunks.
+Methods:
+- `extract_page_openai()` & `extract_page_gemini()`: Native API bindings using 
+  Pydantic schema definitions to ensure perfect JSON outputs.
+- `convert_document_fast_api()`: Main pipeline. Splits PDFs into rendered JPEG images 
+  or chunks DOM elements for HTML files, then farms them out to worker threads simultaneously.
+
+
+D. Exporters (Generators)
+--------------------------
+File 1: `converter/html_exporter.py`
+- `export_edited_html(baseline_doc)`: Recursive function stepping through the block 
+  tree. Wraps blocks in semantic HTML (`<h2>`, `<p>`, `<blockquote>`, `<table>`, `<ul>`).
+
+File 2: `converter/docx_exporter.py`
+- `export_edited_docx(baseline_doc)`: Uses `python-docx`. Iterates blocks and maps 
+  them to native Word styles (`Heading 1`, `Quote`, `List Bullet`, `Table Grid`).
+
+File 3: `converter/pdf_exporter.py`
+- `export_edited_pdf(original_pdf_bytes, baseline_doc)`: Uses `PyMuPDF` (`fitz`). 
+  Iterates through the original PDF pages, looks up the bounding box (`bbox`) for each 
+  block, draws a white rectangle over the old text (masking it), and redraws the 
+  newly edited Streamlit text over the top.
+
+
+E. UI Styling and Utilities
+--------------------------
+File 1: `styles.py`
+Purpose: Supplies all the Custom CSS used in the Streamlit app to look premium.
+Methods:
+- `get_block_color(block_type)`: Fetches a hex color based on block semantics.
+- `render_block_badge()`, `render_property_chips()`, `render_metric_card()`: 
+  Returns specialized HTML strings injected via `st.markdown(..., unsafe_allow_html=True)`.
+
+File 2: `utils.py`
+Purpose: General helper functions for the application logic.
+Methods:
+- `get_page_image()`, `get_page_count()`: Basic PDF rendering for the UI's Preview Tab.
+- `flatten_blocks(blocks)`: Recursively extracts a flat list of blocks to count editable fields.
+- `apply_content_edits()`: Safe mutation logic dicts.
+- `clear_document_content()`: Deep copies a document and forcibly empties string content 
+  (used for the "Download Empty Template Schema" button).
