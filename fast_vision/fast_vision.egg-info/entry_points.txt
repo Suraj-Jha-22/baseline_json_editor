@@ -1,0 +1,2 @@
+[console_scripts]
+fast-vision = cli:main

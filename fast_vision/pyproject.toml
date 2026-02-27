@@ -1,0 +1,29 @@
+[project]
+name = "fast-vision"
+version = "0.1.0"
+description = "SOTA PDF → Layout and Tone Aware Document Schema v3.0 JSON extractor"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pdfplumber>=0.11.0",
+    "pypdfium2>=4.20.0",
+    "Pillow>=10.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "python-docx>=1.1.0",
+    "openai>=1.40.0",
+    "google-genai>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.4.0"]
+
+[project.scripts]
+fast-vision = "cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fast_vision", "fast_vision.*"]
